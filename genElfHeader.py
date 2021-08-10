@@ -2,7 +2,8 @@ import re
 
 br = bv.get_view_of_type('Raw')
 TEXT_OFFSET = 0x18000
-CUR_TEXT_SZ = len(br)
+OG_TEXT_SZ = len(br)
+
 TEXT_ENTRY = 0xc0008000
 TEXT_END = 0
 
@@ -22,6 +23,11 @@ KSYMTAB_SYM = '__start_rodata'
 KSYMTAB_GPL_SYM = '__start___ksymtab_gpl'
 KSYMTAB_STRINGS_SYM = '__start___kcrctab'
 PARAM_SYM = '__start___param'
+
+gSymList = []
+gSecList = []
+gShndxRaw = '\x00'
+gStrRaw = '\x00'
 
 def getIndexObject(targetVar):
     potentialIndex = re.search(r"[\[\d\]]+", targetVar)
@@ -120,10 +126,13 @@ def patchStructMem(targetVar, toWrite, *args):
             print("wrong size?!?!?", len(toWrite), netSize)
             return -1
     if enumBool != None:
-        annotateEnum = toWrite.split(' | ')
-        enumValue = 0
-        for i in annotateEnum:
-            enumValue = enumValue | getEnumValue(enumBool, i)
+        if isinstance(toWrite, str):
+            annotateEnum = toWrite.split(' | ')
+            enumValue = 0
+            for i in annotateEnum:
+                enumValue = enumValue | getEnumValue(enumBool, i)
+        else:
+            enumValue = toWrite
         toWrite = int.to_bytes(enumValue, byteorder='little', length=netSize)
     retValue = br.write(targAddr + netOffset, toWrite)
     return retValue
@@ -133,22 +142,57 @@ def fetchStructMem(targetVar, *args):
     retValue = br.read(targAddr + netOffset, netSize)
     return retValue
 
+class elfSymbol:
+    def __init__(self, symName, symNameOff, symValue, symInfo, symOther=0, symShndx=0):
+        self.symName = symName
+        self.symNameOff = symNameOff
+        self.symValue = symValue
+        self.symInfo = symInfo
+        self.symOther = symOther
+        self.symShndx = symShndx
+
+class elfShndxEnt:
+    def __init__(self, name, address, size):
+        self.name = name
+        self.address = address
+        self.size = size
+
+class elfSection:
+    def __init__(self, secName=0, secNameOff=0, secType=0, secFlags=0, secAddr=0, secOffset=0, secSize=0, secAlign=0):
+        self.secName = secName
+        self.secNameOff = secNameOff
+        self.secType = secType
+        self.secFlags = secFlags
+        self.secAddr = secAddr
+        self.secOffset = secOffset
+        self.secSize = secSize
+        self.secAlign = secAlign
+
 def createHeaderSection(initPadding):
+    global CUR_TEXT_SZ
     br.insert(0, initPadding * '\x00')
+    CUR_TEXT_SZ += initPadding
 
 def phEntry(phOff, p_type, offset, virtual_address, physical_address, file_size, memory_size, flags, align):
     patchStructMem(phOff, p_type, 'type')
+    
     targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['offset'])
     patchStructMem(phOff, int.to_bytes(offset, byteorder='little', length=netSize), 'offset')
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['virtual_address'])
     patchStructMem(phOff, int.to_bytes(virtual_address, byteorder='little', length=netSize), 'virtual_address')
+    
     targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['physical_address'])
     patchStructMem(phOff, int.to_bytes(physical_address, byteorder='little', length=netSize), 'physical_address')
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['file_size'])
     patchStructMem(phOff, int.to_bytes(file_size, byteorder='little', length=netSize), 'file_size')
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['memory_size'])
     patchStructMem(phOff, int.to_bytes(memory_size, byteorder='little', length=netSize), 'memory_size')
+
     patchStructMem(phOff, flags, 'flags')
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['align'])
     patchStructMem(phOff, int.to_bytes(align, byteorder='little', length=netSize), 'align')
 
@@ -160,139 +204,237 @@ def fillProgramHeader(pho):
     br.define_user_symbol(someVarThingSym)
     br.define_user_data_var(pho, Type.array(Elf32_PH_typeS, 1))
     entryIndex = 0
+    # this has an entry pointing to the beginning of the section header, so
     phEntry('{}[{}]'.format(curTempDataName, entryIndex), "PT_LOAD", TEXT_OFFSET,
-        TEXT_ENTRY, TEXT_ENTRY, CUR_TEXT_SZ, CUR_TEXT_SZ, "PF_X | PF_W | PF_R",
+        TEXT_ENTRY, TEXT_ENTRY, OG_TEXT_SZ, OG_TEXT_SZ, "PF_X | PF_W | PF_R",
         0x10000)
     return entryIndex
-
-class elfSymbol:
-    def __init__(self, symAddr, symType, symName):
-        self.symAddr = symAddr
-        self.symType = symType
-        self.symName = symName
-
-class elfSection:
-    def __init__(self, secAddr, secSize, secName, secOffset):
-        self.secAddr = secAddr
-        self.secSize = secSize
-        self.secName = secName
-        self.secOffset = secOffset
 
 def parseSymFile(symFile, symStart='stext', symEnd='_etext'):
     global TEXT_ENTRY
     global TEXT_END
+    global OG_TEXT_SZ
+    global gSymList
+    global gShndxRaw
+    global gStrRaw
     f = open(symFile, "r")
     g = f.readlines()
     f.close()
-    symList = []
-    activeParsing=False
+    secPrev = 0
     for i in g:
+        # populate section
         i = i.replace('\n', '')
         lineDexed = i.split(' ')
-        curElfSymbol = elfSymbol(int(lineDexed[0], 0x10), lineDexed[1], lineDexed[2])
-        if curElfSymbol.symName == symStart:
-            TEXT_ENTRY = curElfSymbol.symAddr
-            activeParsing=True
-        elif curElfSymbol.symName == symEnd:
-            TEXT_END = curElfSymbol.symAddr
-            activeParsing=False
-        if activeParsing == True:
-            symList.append(curElfSymbol)            
-        # if curElfSymbol.symName in SYM_SECTLIST.keys():
-    return symList
+        symCurType = parseSymType(lineDexed[1])
+        symCurAddr = int(lineDexed[0], 0x10)
+        symCurName = lineDexed[2]
+        symCurNameOff = len(gStrRaw)
+        gStrRaw += symCurName + '\x00'
+        if symCurName == symStart:
+            TEXT_ENTRY = symCurAddr
+        elif symCurName == symEnd:
+            TEXT_END = symCurAddr
+        
+        if symCurName in SYM_SECTLIST.keys():
+            curSectName = SYM_SECTLIST[symCurName]
+            shndxLen = len(gShndxRaw)
+            curShndxStr = curSectName + '\x00'
+            gShndxRaw += curShndxStr
 
-def createSynStrTab(symbolList):
-    curTempDataName = "Elf32_Sym"
-    symTabRaw = ""
-    strTabRaw = ""
-    symTabRef = 0
-    for i in symbolList:
-        curLen = i.symName + '\x00'
-        strTabRaw += curLen
+            offReal = (symCurAddr - TEXT_ENTRY) + TEXT_OFFSET
+            secSize = offReal - secPrev
+            if curSectName == '.init':
+                curSectFlags = 'SHF_WRITE | SHF_ALLOC | SHF_EXECINSTR'
+                curAlign = 0x20
+            elif curSectName == '.text':
+                curSectFlags = 'SHF_ALLOC | SHF_EXECINSTR'
+                curAlign = 0x400
+            elif curSectName == '__ksymtab':
+                curSectFlags = 'SHF_ALLOC'
+                curAlign = 0x4
+            elif curSectName == '__ksymtab_gpl':
+                curSectFlags = 'SHF_ALLOC'
+                curAlign = 0x4
+            elif curSectName == '__ksymtab_strings':
+                curSectFlags = 'SHF_ALLOC'
+                curAlign = 0x1
+            elif curSectName == '__param':
+                curSectFlags = 'SHF_ALLOC'
+                curAlign = 0x4
+            elif curSectName == '.data':
+                curSectFlags = 'SHF_WRITE | SHF_ALLOC'
+                curAlign = 0x20
+
+            curSecTmp = elfSection(curSectName, shndxLen, 'SHT_PROGBITS', curSectFlags, symCurAddr, offReal, 0, curAlign)
+            curElfSymbol = elfSymbol(symName=curSectName, symValue=symCurAddr, symInfo=0x03, symShndx=(len(gSecList) + 1))
+            gSymList.append(curElfSymbol)
+            if len(gSecList) > 0:
+                gSecList[len(gSecList) - 1].secSize = secSize
+
+            gSecList.append(curSecTmp)
+
+            secPrev = offReal
+
+        curElfSymbol = elfSymbol(symName=symCurName, symNameOff=symCurNameOff, symValue=symCurAddr, symInfo=symCurType,
+            symShndx=(len(gSecList) + 1))
+        gSymList.append(curElfSymbol)
+
+        # if curElfSymbol.symName in SYM_SECTLIST.keys():
+
+    gSecList[len(gSecList) - 1].secSize = OG_TEXT_SZ - gSecList[len(gSecList) - 1].secOffset
+    return gSymList
+
+def syEntry(curVarAccessor, curSym, curTempDataName):
         # name
         targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['name'])
-        symTabRaw += int.to_bytes(symTabRef, byteorder='little', length=netSize)
+        patchStructMem(curVarAccessor, int.to_bytes(curSym.symNameOff, byteorder='little', length=netSize), 'name')
         # value
         targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['value'])
-        symTabRaw += int.to_bytes(i.symAddr, byteorder='little', length=netSize)
+        patchStructMem(curVarAccessor, int.to_bytes(curSym.symValue, byteorder='little', length=netSize), 'value')
         # size
         targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['size'])
-        symTabRaw += int.to_bytes(0, byteorder='little', length=netSize)
+        patchStructMem(curVarAccessor, int.to_bytes(0, byteorder='little', length=netSize), 'size')
         # info
         targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['info'])
-        symTabRaw += int.to_bytes(0, byteorder='little', length=netSize)
+        patchStructMem(curVarAccessor, int.to_bytes(curSym.symInfo, byteorder='little', length=netSize), 'info')
         # other
         targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['other'])
-        symTabRaw += int.to_bytes(0, byteorder='little', length=netSize)
+        patchStructMem(curVarAccessor, int.to_bytes(curSym.symOther, byteorder='little', length=netSize), 'other')
         # shndx
         targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['shndx'])
-        symTabRaw += int.to_bytes(0, byteorder='little', length=netSize)
-        symTabRef += len(curLen)
-    return symTabRaw, strTabRaw
+        patchStructMem(curVarAccessor, int.to_bytes(curSym.symShndx, byteorder='little', length=netSize), 'shndx')
 
-def createSecHead(symbolList):
-    shndxRaw = "\x00"
-    elfSecRaw = ""
-    curTempDataName = 'Elf32_SectionHeader'
-    elfSecRef = len(shndxRaw)
-    secList = []
-    secListIndex = 0
-    secCur = 0
-    for i in symbolList:
-        if i.symNmae in SYM_SECTLIST.keys():
-            curLen = i.symName + '\x00'
-            shndxRaw += curLen
-            # name
-            targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['name'])
-            elfSecRaw += int.to_bytes(elfSecRef, byteorder='little', length=netSize)
-            # type
-            targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['type'])
-            elfSecRaw += int.to_bytes(elfSecRef, byteorder='little', length=netSize)
-            # ...
-            # address
-            targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['address'])
-            elfSecRaw += int.to_bytes(i.symAddr, byteorder='little', length=netSize)
+# create the 
+def createSymStrTab():
+    global CUR_TEXT_SZ
+    global gStrRaw
+    curTempDataName = "Elf32_Sym"
 
-            offReal = (i.symAddr - TEXT_ENTRY) + TEXT_OFFSET
-            secSize = offReal - secCur
-            curSecTmp = elfSection(i.symAddr, 0, i.symName, offReal)
-            
-            if len(secList) > 0:
-                secList[len(secList) - 1].secSize = offReal - secCur
+    Elf32_SY_typeS = br.get_type_by_name(curTempDataName)
+    Elf32_SY_typeW = Elf32_SY_typeS.width
+    br.insert((Elf32_SY_typeW * len(gSymList)) * "\x00")
+    
+    curTempDataName = '__elf_symbol_table'
+    someVarThingSym = Symbol(SymbolType.DataSymbol, CUR_TEXT_SZ, curTempDataName)
+    br.define_user_symbol(someVarThingSym)
+    br.define_user_data_var(CUR_TEXT_SZ, Type.array(Elf32_SY_typeS, len(gSymList)))
 
-            secCur = offReal
-            elfSecRef += len(curLen)
+    CUR_TEXT_SZ += (Elf32_SY_typeW * len(gSymList))
+
+    symTabIndex = 0
+
+    for curSym in gSymList:
+        curVarAccessor = "{}[{}]".format(curTempDataName, symTabIndex)
+        syEntry(curVarAccessor, curSym, curTempDataName)
+        symTabIndex += 1
+    
+    br.insert(gStrRaw)
+
+def createShndx():
+    global gShndxRaw
+    global gSecList
+    global CUR_TEXT_SZ
+
+    shdrName = '.shstrtab'
+    shndxOffTmp = len(gShndxRaw)
+    gShndxRaw += shdrName + '\x00'
+    shstrSec = elfSection(shdrName, shndxOffTmp, 'SHT_STRTAB', 0, 0, CUR_TEXT_SZ, 0, 0x1)
 
 
-def createShndx(symbolList):
-    shndxRaw = "\x00"
-    for i in SYM_SECTLIST.keys():
-        shndxRaw += i + '\x00'
+    gShndxRaw += '.symtab' + '\x00'
+    shndxOffTmp = len(gShndxRaw)
+    gShndxRaw += shdrName + '\x00'
+    symSec = elfSection(shdrName, shndxOffTmp, 'SHT_SYMTAB', 0, 0, CUR_TEXT_SZ, 0, 0x4)
+
+
+    gShndxRaw += '.strtab' + '\x00'
+    shndxOffTmp = len(gShndxRaw)
+    gShndxRaw += shdrName + '\x00'
+    strSec = elfSection(shdrName, shndxOffTmp, 'SHT_STRTAB', 0, 0, CUR_TEXT_SZ, 0, 0x1)
+
+    shstrSec.secSize = len(gShndxRaw)
+    gSecList.insert(0, elfSection())
+    gSecList.append(shstrSec)
+    gSecList.append(symSec)
+    gSecList.append(strSec)
+
+    br.insert(CUR_TEXT_SZ, gShndxRaw)
+    CUR_TEXT_SZ += len(gShndxRaw)
+
+
+def shEntry(curVarAccessor, curSec, secHeadName):
+    # name
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['name'])
+    patchStructMem(curVarAccessor, int.to_bytes(curSec.secNameOff, byteorder='little', length=netSize), 'name')
+    # type
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['type'])
+    patchStructMem(curVarAccessor, curSec.secType, 'type')
+    # flags
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['flags'])
+    patchStructMem(curVarAccessor, curSec.secflags, 'flags')
+    # address
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['address'])
+    patchStructMem(curVarAccessor, int.to_bytes(curSec.secAddr, byteorder='little', length=netSize), 'address')
+    # offset
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['offset'])
+    patchStructMem(curVarAccessor, int.to_bytes(curSec.secOffset, byteorder='little', length=netSize), 'offset')        
+    # size
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['size'])
+    patchStructMem(curVarAccessor, int.to_bytes(curSec.secSize, byteorder='little', length=netSize), 'size')
+    # align
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['align'])
+    patchStructMem(curVarAccessor, int.to_bytes(curSec.secAlign, byteorder='little', length=netSize), 'align')
+    if curSec.secName == '.symtab':
+        # link
+        targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['link'])
+        patchStructMem(curVarAccessor, int.to_bytes(0xf, byteorder='little', length=netSize), 'link')
+        # info
+        targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['info'])
+        patchStructMem(curVarAccessor, int.to_bytes(0x807a, byteorder='little', length=netSize), 'info')
+        # entry_size
+        targAddr, netOffset, netSize, enumBool = getStructMemOff(secHeadName, ['entry_size'])
+        patchStructMem(curVarAccessor, int.to_bytes(br.get_type_by_name("Elf32_Sym").width, byteorder='little', length=netSize), 'entry_size')
+
 
 # it should be .shstrtab
 # section header
 # symtab
 # strtab
-
 def fillSectionHeader(sho):
-    result = -1
-    symFile
-    if symFile == None:
-        return result
+    global gSecList
+    global CUR_TEXT_SZ
     symbolList = parseSymFile(symFile)
-    shndxTab = createShndx(symbolList)
-    secHead = createSecHead(symbolList)
-    symTabRaw, strTabRaw = createStrTab(symbolList)
-    br.insert()
+    shndxTab = createShndx()
+
+    secHeadIndex = 0
+    totalSections = len(gSecList)
+    secHeadName = 'Elf32_SectionHeader'
+    Elf32_SH_typeS = br.get_type_by_name(secHeadName)
+    Elf32_SH_typeW = Elf32_SH_typeS.width
+    br.insert((Elf32_SH_typeW * totalSections) * "\x00")
+    
+    curTempDataName = '__elf_section_headers'
+    someVarThingSym = Symbol(SymbolType.DataSymbol, CUR_TEXT_SZ, curTempDataName)
+    br.define_user_symbol(someVarThingSym)
+    br.define_user_data_var(CUR_TEXT_SZ, Type.array(Elf32_SH_typeS, totalSections))
+
+    CUR_TEXT_SZ += Elf32_SH_typeW * totalSections
+
+    for curSec in gSecList:
+        curVarAccessor = "{}[{}]".format(curTempDataName, secHeadIndex)
+        shEntry(curVarAccessor, curSec, secHeadName)
+        secHeadIndex += 1
+
+    createSymStrTab()
 
 def fillElfHeader():
     symFile
+    global CUR_TEXT_SZ
     parseSymFile(symFile)
     createHeaderSection(TEXT_OFFSET)
     Elf32_Head_typeS = br.get_type_by_name("Elf32_Header")
     curTempDataName = '__elf_header'
     curHeadAddress = 0
-    curTextSize = CUR_TEXT_SZ + TEXT_OFFSET
     someVarThingSym = Symbol(SymbolType.DataSymbol, curHeadAddress, curTempDataName)
     br.define_user_symbol(someVarThingSym)
     br.define_user_data_var(curHeadAddress, Elf32_Head_typeS)
@@ -307,24 +449,31 @@ def fillElfHeader():
     patchStructMem(curTempDataName, b"\x01", "version")
     targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['entry'])
     patchStructMem(curTempDataName, int.to_bytes(TEXT_ENTRY, byteorder='little', length=netSize), "entry")
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['program_header_offset'])
     pho = Elf32_Head_typeS.width
-    # phoRaw = int.to_bytes(pho, byteorder='little', length=netSize)
     patchStructMem(curTempDataName, int.to_bytes(pho, byteorder='little', length=netSize), "program_header_offset")
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_offset'])
-    # sho = int.to_bytes(curTextSize, byteorder='little', length=netSize)
-    patchStructMem(curTempDataName, int.to_bytes(curTextSize, byteorder='little', length=netSize), "section_header_offset")
+
     patchStructMem(curTempDataName, "\x02\x06\x00\x00", "flags")
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['header_size'])
     patchStructMem(curTempDataName, int.to_bytes(pho, byteorder='little', length=netSize), "header_size")
+
     phs = br.get_type_by_name("Elf32_ProgramHeader").width
     phs = int.to_bytes(phs, byteorder='little', length=netSize)
     targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['program_header_size'])
     patchStructMem(curTempDataName, phs, "program_header_size")
+
     phoEntries = fillProgramHeader(pho)
+
     eSym = br.get_type_by_name("Elf32_Sym").width
     targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_size'])
     patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder='little', length=netSize), "section_header_size")
+
     shoEntries = fillSectionHeader()
+
+    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_offset'])
+    patchStructMem(curTempDataName, int.to_bytes(CUR_TEXT_SZ, byteorder='little', length=netSize), "section_header_offset")
+
     targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_count'])
     patchStructMem(curTempDataName, int.to_bytes(0xd, byteorder='little', length=netSize), "section_header_count")
