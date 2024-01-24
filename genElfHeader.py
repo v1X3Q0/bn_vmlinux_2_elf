@@ -108,6 +108,22 @@ def getStructMemOff(targetVar, args):
     # print("final width ", netSize)
     return targVarSym.address, netOffset, netSize, enumBool
 
+def getStructMemOff_targAddr(targetVar, args):
+    targAddr, _, _, _ = getStructMemOff(targetVar, args)
+    return targAddr
+
+def getStructMemOff_netOffset(targetVar, args):
+    _, netOffset, _, _ = getStructMemOff(targetVar, args)
+    return netOffset
+
+def getStructMemOff_netSize(targetVar, args):
+    _, _, netSize, _ = getStructMemOff(targetVar, args)
+    return netSize
+
+def getStructMemOff_enumBool(targetVar, args):
+    _, _, _, enumBool = getStructMemOff(targetVar, args)
+    return enumBool
+
 def getEnumName(enumType, enumIndex):
     for i in enumType.members:
         if i.value == enumIndex:
@@ -178,28 +194,27 @@ def createHeaderSection(initPadding):
 def phEntry(phOff, p_type, offset, virtual_address, physical_address, file_size, memory_size, flags, align):
     patchStructMem(phOff, p_type, 'type')
     
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['offset'])
+    netSize = getStructMemOff_netSize(phOff, ['offset'])
     patchStructMem(phOff, int.to_bytes(offset, byteorder='little', length=netSize), 'offset')
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['virtual_address'])
+    netSize = getStructMemOff_netSize(phOff, ['virtual_address'])
     patchStructMem(phOff, int.to_bytes(virtual_address, byteorder='little', length=netSize), 'virtual_address')
     
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['physical_address'])
+    netSize = getStructMemOff_netSize(phOff, ['physical_address'])
     patchStructMem(phOff, int.to_bytes(physical_address, byteorder='little', length=netSize), 'physical_address')
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['file_size'])
+    netSize = getStructMemOff_netSize(phOff, ['file_size'])
     patchStructMem(phOff, int.to_bytes(file_size, byteorder='little', length=netSize), 'file_size')
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['memory_size'])
+    netSize = getStructMemOff_netSize(phOff, ['memory_size'])
     patchStructMem(phOff, int.to_bytes(memory_size, byteorder='little', length=netSize), 'memory_size')
 
     patchStructMem(phOff, flags, 'flags')
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(phOff, ['align'])
+    netSize = getStructMemOff_netSize(phOff, ['align'])
     patchStructMem(phOff, int.to_bytes(align, byteorder='little', length=netSize), 'align')
 
 def fillProgramHeader(pho):
-    result = -1
     Elf32_PH_typeS = br.get_type_by_name("Elf32_ProgramHeader")
     curTempDataName = "__elf_program_headers"
     someVarThingSym = Symbol(SymbolType.DataSymbol, pho, curTempDataName)
@@ -308,22 +323,22 @@ def parseSymFile(symFile, symStart='stext', symEnd='_etext'):
 
 def syEntry(curVarAccessor, curSym, curTempDataName):
     # name
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['name'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['name'])
     patchStructMem(curVarAccessor, int.to_bytes(curSym.symNameOff, byteorder='little', length=netSize), 'name')
     # value
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['value'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['value'])
     patchStructMem(curVarAccessor, int.to_bytes(curSym.symValue, byteorder='little', length=netSize), 'value')
     # size
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['size'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['size'])
     patchStructMem(curVarAccessor, int.to_bytes(0, byteorder='little', length=netSize), 'size')
     # info
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['info'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['info'])
     patchStructMem(curVarAccessor, int.to_bytes(curSym.symInfo, byteorder='little', length=netSize), 'info')
     # other
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['other'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['other'])
     patchStructMem(curVarAccessor, int.to_bytes(curSym.symOther, byteorder='little', length=netSize), 'other')
     # shndx
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['shndx'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['shndx'])
     patchStructMem(curVarAccessor, int.to_bytes(curSym.symShndx, byteorder='little', length=netSize), 'shndx')
 
 # create the 
@@ -400,36 +415,36 @@ def createShndx():
 
 def shEntry(curVarAccessor, curSec, secHeadName):
     # name
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['name'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['name'])
     patchStructMem(curVarAccessor, int.to_bytes(curSec.secNameOff, byteorder='little', length=netSize), 'name')
     # type
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['type'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['type'])
     patchStructMem(curVarAccessor, curSec.secType, 'type')
     # flags
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['flags'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['flags'])
     patchStructMem(curVarAccessor, curSec.secFlags, 'flags')
     # address
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['address'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['address'])
     patchStructMem(curVarAccessor, int.to_bytes(curSec.secAddr, byteorder='little', length=netSize), 'address')
     # offset
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['offset'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['offset'])
     patchStructMem(curVarAccessor, int.to_bytes(curSec.secOffset, byteorder='little', length=netSize), 'offset')        
     # size
     # print("section {} size {}".format(curSec.secName, hex(curSec.secSize)))
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['size'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['size'])
     patchStructMem(curVarAccessor, int.to_bytes(curSec.secSize, byteorder='little', length=netSize), 'size')
     # align
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['align'])
+    netSize = getStructMemOff_netSize(curVarAccessor, ['align'])
     patchStructMem(curVarAccessor, int.to_bytes(curSec.secAlign, byteorder='little', length=netSize), 'align')
     if curSec.secName == '.symtab':
         # link
-        targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['link'])
+        netSize = getStructMemOff_netSize(curVarAccessor, ['link'])
         patchStructMem(curVarAccessor, int.to_bytes(len(gSecList) - 1, byteorder='little', length=netSize), 'link')
         # info
-        targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['info'])
+        netSize = getStructMemOff_netSize(curVarAccessor, ['info'])
         patchStructMem(curVarAccessor, int.to_bytes(0x807a, byteorder='little', length=netSize), 'info')
         # entry_size
-        targAddr, netOffset, netSize, enumBool = getStructMemOff(curVarAccessor, ['entry_size'])
+        netSize = getStructMemOff_netSize(curVarAccessor, ['entry_size'])
         patchStructMem(curVarAccessor, int.to_bytes(br.get_type_by_name("Elf32_Sym").width, byteorder='little', length=netSize), 'entry_size')
 
 
@@ -494,40 +509,40 @@ def fillElfHeader(symFile):
     patchStructMem(curTempDataName, "ET_EXEC", "type")
     patchStructMem(curTempDataName, "EM_ARM", "machine")
     patchStructMem(curTempDataName, b"\x01", "version")
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['entry'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['entry'])
     patchStructMem(curTempDataName, int.to_bytes(TEXT_ENTRY, byteorder='little', length=netSize), "entry")
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['program_header_offset'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['program_header_offset'])
     pho = Elf32_Head_typeS.width
     patchStructMem(curTempDataName, int.to_bytes(pho, byteorder='little', length=netSize), "program_header_offset")
 
     patchStructMem(curTempDataName, "\x02\x06\x00\x00", "flags")
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['header_size'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['header_size'])
     patchStructMem(curTempDataName, int.to_bytes(pho, byteorder='little', length=netSize), "header_size")
 
     phs = br.get_type_by_name("Elf32_ProgramHeader").width
     phs = int.to_bytes(phs, byteorder='little', length=netSize)
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['program_header_size'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['program_header_size'])
     patchStructMem(curTempDataName, phs, "program_header_size")
 
     phoEntries = fillProgramHeader(pho)
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['program_header_count'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['program_header_count'])
     patchStructMem(curTempDataName, int.to_bytes(phoEntries, byteorder='little', length=netSize), "program_header_count")
 
     eSym = br.get_type_by_name("Elf32_SectionHeader").width
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_size'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['section_header_size'])
     patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder='little', length=netSize), "section_header_size")
 
     shoEntries = fillSectionHeader()
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_offset'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['section_header_offset'])
     patchStructMem(curTempDataName, int.to_bytes(SH_OFFSET, byteorder='little', length=netSize), "section_header_offset")
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['section_header_count'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['section_header_count'])
     patchStructMem(curTempDataName, int.to_bytes(len(gSecList), byteorder='little', length=netSize), "section_header_count")
 
-    targAddr, netOffset, netSize, enumBool = getStructMemOff(curTempDataName, ['string_table'])
+    netSize = getStructMemOff_netSize(curTempDataName, ['string_table'])
     patchStructMem(curTempDataName, int.to_bytes(len(gSecList) - 3, byteorder='little', length=netSize), "string_table")
 
     print("finished")
