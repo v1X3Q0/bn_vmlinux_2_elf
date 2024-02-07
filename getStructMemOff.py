@@ -1,5 +1,7 @@
 import re
 
+from binaryninja import TypeClass
+
 class bn_structRetriever:
     def __init__(self, bv, br):
         self.bv = bv
@@ -7,7 +9,7 @@ class bn_structRetriever:
 
     # check if the variable in question is an index variable, return
     # the variable base name and the index it is after.
-    def getIndexObject(targetVar):
+    def getIndexObject(self, targetVar):
         potentialIndex = re.search(r"[\[\d\]]+", targetVar)
         targVarReal = targetVar
         if potentialIndex != None:
@@ -18,71 +20,84 @@ class bn_structRetriever:
 
         return targVarReal, potentialIndex
 
+    # if a struct, give back struct name. else, give back none
     def getRealStructType(self, structDesig):
         resStruct = None
         namedStruct = structDesig.get_string_before_name()
         if 'struct ' in namedStruct:
-            resStruct = self.br.get_type_by_name(namedStruct.replace("struct ", ''))
+            resStruct = self.bv.get_type_by_name(namedStruct.replace("struct ", ''))
         return resStruct
 
+    # if a enum, give back enum name. else, give back none
     def getRealEnumType(self, enumDesig):
         resEnum = None
         namedEnum = enumDesig.get_string_before_name()
         if 'enum ' in namedEnum:
-            resEnum = self.br.get_type_by_name(namedEnum.replace("enum ", ''))
+            resEnum = self.bv.get_type_by_name(namedEnum.replace("enum ", ''))
         return resEnum
+
+    def structArrFilter(self, potentialIndex, target_variable_instance, netOffset):
+        iterating_type = target_variable_instance.type.get_string_before_name()
+        if 'struct ' in iterating_type:
+            iterating_type = self.bv.get_type_by_name(iterating_type.replace("struct ", ''))
+        else:
+            # element type means its a primitive type, and get the base.
+            iterating_type = target_variable_instance.type
+        netOffset += (iterating_type.width * potentialIndex)
+        # targVarVar.type.get_string_before_name()
+        return iterating_type, netOffset
 
     # potential ways to call
     # "__elf_program_headers[2]", "type"
-    def getStructMemOff(self, targetVar, args):
+    def getStructMemOff(self, target_variable_name_whole, struct_member_rabbit_hole):
         netOffset = 0
         netSize = 0
-        targetVar, potentialIndex = self.getIndexObject(targetVar)
-        targVarSym = self.br.get_symbol_by_raw_name(targetVar)
-        targVarVar = self.br.get_data_var_at(targVarSym.address)
+        target_variable_name, potentialIndex = self.getIndexObject(target_variable_name_whole)
+        target_variable_symbol = self.br.get_symbol_by_raw_name(target_variable_name)
+        target_variable_instance = self.br.get_data_var_at(target_variable_symbol.address)
+
+        # first, we need to see if object in question is an array with a provided index. if so,
+        # go to that index
         if potentialIndex != None:
-            nextTargVar = targVarVar.type.get_string_before_name()
-            if 'struct ' in nextTargVar:
-                nextTargVar = self.br.get_type_by_name(nextTargVar.replace("struct ", '')).structure
-            else:
-                nextTargVar = targVarVar.type.element_type
-            netOffset += (nextTargVar.width * potentialIndex)
-            # targVarVar.type.get_string_before_name()
+            iterating_type, netOffset = self.structArrFilter(potentialIndex, target_variable_instance, netOffset)
+        # if not, get the structure being used, it will serve as our base for iteration
         else:
-            nextTargVar = targVarVar.type.structure
+            iterating_type = target_variable_instance.type
+        # if our type is just a reference to another type, we have to resolve it to its target.
+        if iterating_type.type_class == TypeClass.NamedTypeReferenceClass:
+            iterating_type = iterating_type.target(self.bv)
         enumBool = None
-        if nextTargVar != None:
+        if iterating_type != None:
             # iterate struct members
-            for i in args:
-                curTargVar = nextTargVar
-                curTargVarName, potentialIndex = self.getIndexObject(i)
+            for struct_member in struct_member_rabbit_hole:
+                curTargVar = iterating_type
+                cur_struct_member_name, potentialIndex = self.getIndexObject(struct_member)
                 # for each member in the current struct being observed
                 for eachMem in curTargVar.members:
                     # if the struct member's name is the target arg
-                    if eachMem.name == curTargVarName:
+                    # pull the type into new iterating_type
+                    if eachMem.name == cur_struct_member_name:
+                        if eachMem.type.type_class == TypeClass.NamedTypeReferenceClass:
+                            eachMem_type = eachMem.type.target(self.bv)
+                        else:
+                            eachMem_type = eachMem.type
                         if potentialIndex != None:
-                            nextTargVar = targVarVar.type.get_string_before_name()
-                            if 'struct ' in nextTargVar:
-                                nextTargVar = self.br.get_type_by_name(nextTargVar.replace("struct ", ''))
-                            else:
-                                nextTargVar = targVarVar.type.element_type
-                            netOffset += (nextTargVar.width * potentialIndex)
+                            iterating_type, netOffset = self.structArrFilter(potentialIndex, eachMem_type, netOffset)
                         netOffset += eachMem.offset
-                        netSize = eachMem.type.width
-                        potStructType = self.getRealStructType(eachMem.type)
-                        potEnumType = self.getRealEnumType(eachMem.type)
+                        netSize = eachMem_type.width
+                        potStructType = self.getRealStructType(eachMem_type)
+                        potEnumType = self.getRealEnumType(eachMem_type)
                         if potStructType != None:
-                            nextTargVar = potStructType.structure
-                        elif eachMem.type.element_type != None:
-                            nextTargVar = eachMem.type.element_type
+                            iterating_type = potStructType
                         elif potEnumType != None:
-                            enumBool = potEnumType.enumeration
+                            enumBool = potEnumType
+                        # else it must be a primitive! stuff ends here, break out
                         break
         else:
-            netSize = targVarVar.type.width
+            netSize = target_variable_instance.type.width
         # we have broken out, optimistically we are at the most primitive type
         # print("final width ", netSize)
-        return targVarSym.address, netOffset, netSize, enumBool
+        return target_variable_symbol.address, netOffset, netSize, enumBool
 
     def getStructMemOff_targAddr(self, targetVar, args):
         targAddr, _, _, _ = self.getStructMemOff(targetVar, args)

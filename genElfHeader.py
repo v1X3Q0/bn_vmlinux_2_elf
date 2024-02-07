@@ -4,6 +4,7 @@ import re
 from .getStructMemOff import bn_structRetriever
 # from .parseSymFile import parseSymFile
 from .pyelf import elfSection, elfShndxEnt, elfSymbol
+from .bn_raw_elf_fill.setupTypes import grabLinuxElfTypes
 
 def getEnumName(enumType, enumIndex):
     for i in enumType.members:
@@ -12,6 +13,7 @@ def getEnumName(enumType, enumIndex):
     return None
 
 def getEnumValue(enumType, enumName):
+    print(enumType, enumName)
     for i in enumType.members:
         if i.name == enumName:
             return i.value
@@ -34,9 +36,9 @@ class vmlinux_raw:
         self.CUR_TEXT_SZ = self.OG_TEXT_SZ
 
         elfbitness = str(self.bv.address_size * 8)
-        self.Elf_Head_typeS = "Elf{}_Header".format(elfbitness)
-        self.secHeadName = 'Elf{}_SectionHeader'.format(elfbitness)
-        self.ElfPrgm = 'Elf{}_ProgramHeader'.format(elfbitness)
+        self.Elf_Head_typeS = "Elf{}_Ehdr".format(elfbitness)
+        self.secHeadName = 'Elf{}_Shdr'.format(elfbitness)
+        self.ElfPrgm = 'Elf{}_Phdr'.format(elfbitness)
         self.ElfSym = "Elf{}_Sym".format(elfbitness)
         if self.bv.address_size == 4:
             prgmsz = 0x20
@@ -87,81 +89,81 @@ class vmlinux_raw:
         return retValue
 
     def phEntry(self, phOff, p_type, offset, virtual_address, physical_address, file_size, memory_size, flags, align):
-        self.patchStructMem(phOff, p_type, 'type')
+        self.patchStructMem(phOff, p_type, 'p_type')
         
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['offset'])
-        self.patchStructMem(phOff, int.to_bytes(offset, byteorder=self.endianess, length=netSize), 'offset')
+        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_offset'])
+        self.patchStructMem(phOff, int.to_bytes(offset, byteorder=self.endianess, length=netSize), 'p_offset')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['virtual_address'])
-        self.patchStructMem(phOff, int.to_bytes(virtual_address, byteorder=self.endianess, length=netSize), 'virtual_address')
+        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_vaddr'])
+        self.patchStructMem(phOff, int.to_bytes(virtual_address, byteorder=self.endianess, length=netSize), 'p_vaddr')
         
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['physical_address'])
-        self.patchStructMem(phOff, int.to_bytes(physical_address, byteorder=self.endianess, length=netSize), 'physical_address')
+        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_paddr'])
+        self.patchStructMem(phOff, int.to_bytes(physical_address, byteorder=self.endianess, length=netSize), 'p_paddr')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['file_size'])
-        self.patchStructMem(phOff, int.to_bytes(file_size, byteorder=self.endianess, length=netSize), 'file_size')
+        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_filesz'])
+        self.patchStructMem(phOff, int.to_bytes(file_size, byteorder=self.endianess, length=netSize), 'p_filesz')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['memory_size'])
-        self.patchStructMem(phOff, int.to_bytes(memory_size, byteorder=self.endianess, length=netSize), 'memory_size')
+        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_memsz'])
+        self.patchStructMem(phOff, int.to_bytes(memory_size, byteorder=self.endianess, length=netSize), 'p_memsz')
 
-        self.patchStructMem(phOff, flags, 'flags')
+        self.patchStructMem(phOff, flags, 'p_flags')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['align'])
-        self.patchStructMem(phOff, int.to_bytes(align, byteorder=self.endianess, length=netSize), 'align')
+        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_align'])
+        self.patchStructMem(phOff, int.to_bytes(align, byteorder=self.endianess, length=netSize), 'p_align')
 
-    def syEntry(self, curVarAccessor, curSym, curTempDataName):
+    def symEntry(self, curVarAccessor, curSym, curTempDataName):
         # name
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['name'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symNameOff, byteorder=self.endianess, length=netSize), 'name')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['st_name'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symNameOff, byteorder=self.endianess, length=netSize), 'st_name')
         # value
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['value'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symValue, byteorder=self.endianess, length=netSize), 'value')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['st_value'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symValue, byteorder=self.endianess, length=netSize), 'st_value')
         # size
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['size'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(0, byteorder=self.endianess, length=netSize), 'size')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['st_size'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(0, byteorder=self.endianess, length=netSize), 'st_size')
         # info
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['info'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symInfo, byteorder=self.endianess, length=netSize), 'info')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['st_info'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symInfo, byteorder=self.endianess, length=netSize), 'st_info')
         # other
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['other'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symOther, byteorder=self.endianess, length=netSize), 'other')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['st_other'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symOther, byteorder=self.endianess, length=netSize), 'st_other')
         # shndx
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['shndx'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symShndx, byteorder=self.endianess, length=netSize), 'shndx')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['st_shndx'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSym.symShndx, byteorder=self.endianess, length=netSize), 'st_shndx')
 
     def shEntry(self, curVarAccessor, curSec, secHeadName):
         # name
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['name'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secNameOff, byteorder=self.endianess, length=netSize), 'name')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_name'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secNameOff, byteorder=self.endianess, length=netSize), 'sh_name')
         # type
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['type'])
-        self.patchStructMem(curVarAccessor, curSec.secType, 'type')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_type'])
+        self.patchStructMem(curVarAccessor, curSec.secType, 'sh_type')
         # flags
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['flags'])
-        self.patchStructMem(curVarAccessor, curSec.secFlags, 'flags')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_flags'])
+        self.patchStructMem(curVarAccessor, curSec.secFlags, 'sh_flags')
         # address
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['address'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secAddr, byteorder=self.endianess, length=netSize), 'address')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_addr'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secAddr, byteorder=self.endianess, length=netSize), 'sh_addr')
         # offset
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['offset'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secOffset, byteorder=self.endianess, length=netSize), 'offset')        
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_offset'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secOffset, byteorder=self.endianess, length=netSize), 'sh_offset')        
         # size
         # print("section {} size {}".format(curSec.secName, hex(curSec.secSize)))
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['size'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secSize, byteorder=self.endianess, length=netSize), 'size')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_size'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secSize, byteorder=self.endianess, length=netSize), 'sh_size')
         # align
-        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['align'])
-        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secAlign, byteorder=self.endianess, length=netSize), 'align')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_addralign'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(curSec.secAlign, byteorder=self.endianess, length=netSize), 'sh_addralign')
         if curSec.secName == '.symtab':
             # link
-            netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['link'])
-            self.patchStructMem(curVarAccessor, int.to_bytes(len(self.gSecList) - 1, byteorder=self.endianess, length=netSize), 'link')
+            netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_link'])
+            self.patchStructMem(curVarAccessor, int.to_bytes(len(self.gSecList) - 1, byteorder=self.endianess, length=netSize), 'sh_link')
             # info
-            netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['info'])
-            self.patchStructMem(curVarAccessor, int.to_bytes(0x807a, byteorder=self.endianess, length=netSize), 'info')
+            netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_info'])
+            self.patchStructMem(curVarAccessor, int.to_bytes(0x807a, byteorder=self.endianess, length=netSize), 'sh_info')
             # entry_size
-            netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['entry_size'])
-            self.patchStructMem(curVarAccessor, int.to_bytes(self.br.get_type_by_name(self.ElfSym).width, byteorder=self.endianess, length=netSize), 'entry_size')
+            netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_entsize'])
+            self.patchStructMem(curVarAccessor, int.to_bytes(self.br.get_type_by_name(self.ElfSym).width, byteorder=self.endianess, length=netSize), 'sh_entsize')
 
     def createHeaderSection(self, initPadding):
         self.br.insert(0, initPadding * '\x00')
@@ -184,7 +186,7 @@ class vmlinux_raw:
 
         for curSym in self.gSymList:
             curVarAccessor = "{}[{}]".format(curTempDataName, symTabIndex)
-            self.syEntry(curVarAccessor, curSym, curTempDataName)
+            self.symEntry(curVarAccessor, curSym, curTempDataName)
             symTabIndex += 1
             # break
         
@@ -274,62 +276,66 @@ class vmlinux_raw:
 
     def fillElfHeader(self, symFile=None):
         # print(hex(CUR_TEXT_SZ))
+        grabLinuxElfTypes(self.bv)
         self.createHeaderSection(self.TEXT_OFFSET)
         # print(hex(CUR_TEXT_SZ))
         # if symFile != None:
         #     parseSymFile(symFile)
-        Elf_Head_typeS = self.br.get_type_by_name(self.Elf_Head_typeS)
+        Elf_Head_typeS = self.bv.get_type_by_name(self.Elf_Head_typeS)
+        if Elf_Head_typeS == None:
+            print("couldn't find {}".format(self.Elf_Head_typeS))
+            return
 
         curTempDataName = '__elf_header'
         curHeadAddress = 0
         someVarThingSym = Symbol(SymbolType.DataSymbol, curHeadAddress, curTempDataName)
         self.br.define_user_symbol(someVarThingSym)
         self.br.define_user_data_var(curHeadAddress, Elf_Head_typeS)
-        self.patchStructMem(curTempDataName, b"\x7fELF", "ident", "signature")
-        self.patchStructMem(curTempDataName, b"\x01", "ident", "file_class")
-        self.patchStructMem(curTempDataName, b"\x01", "ident", "encoding")
-        self.patchStructMem(curTempDataName, b"\x01", "ident", "version")
-        self.patchStructMem(curTempDataName, b"\x61", "ident", "os")
-        self.patchStructMem(curTempDataName, b"\x00", "ident", "abi_version")
-        self.patchStructMem(curTempDataName, "ET_EXEC", "type")
-        self.patchStructMem(curTempDataName, "EM_ARM", "machine")
-        self.patchStructMem(curTempDataName, b"\x01", "version")
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['entry'])
-        self.patchStructMem(curTempDataName, int.to_bytes(self.TEXT_ENTRY, byteorder=self.endianess, length=netSize), "entry")
+        self.patchStructMem(curTempDataName, b"\x7fELF", "e_ident", "signature")
+        self.patchStructMem(curTempDataName, b"\x01", "e_ident", "file_class")
+        self.patchStructMem(curTempDataName, b"\x01", "e_ident", "encoding")
+        self.patchStructMem(curTempDataName, b"\x01", "e_ident", "version")
+        self.patchStructMem(curTempDataName, b"\x61", "e_ident", "os")
+        self.patchStructMem(curTempDataName, b"\x00", "e_ident", "abi_version")
+        self.patchStructMem(curTempDataName, "ET_EXEC", "e_type")
+        self.patchStructMem(curTempDataName, "EM_ARM", "e_machine")
+        self.patchStructMem(curTempDataName, b"\x01", "e_version")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_entry'])
+        self.patchStructMem(curTempDataName, int.to_bytes(self.TEXT_ENTRY, byteorder=self.endianess, length=netSize), "e_entry")
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['program_header_offset'])
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_phoff'])
         pho = Elf_Head_typeS.width
-        self.patchStructMem(curTempDataName, int.to_bytes(pho, byteorder=self.endianess, length=netSize), "program_header_offset")
+        self.patchStructMem(curTempDataName, int.to_bytes(pho, byteorder=self.endianess, length=netSize), "e_phoff")
 
-        self.patchStructMem(curTempDataName, int.to_bytes(0x00000602, byteorder=self.endianess, length=4), "flags")
+        self.patchStructMem(curTempDataName, int.to_bytes(0x00000602, byteorder=self.endianess, length=4), "e_flags")
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['header_size'])
-        self.patchStructMem(curTempDataName, int.to_bytes(pho, byteorder=self.endianess, length=netSize), "header_size")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_ehsize'])
+        self.patchStructMem(curTempDataName, int.to_bytes(pho, byteorder=self.endianess, length=netSize), "e_ehsize")
 
-        phs = self.br.get_type_by_name(self.ElfPrgm).width
+        phs = self.bv.get_type_by_name(self.ElfPrgm).width
         phs = int.to_bytes(phs, byteorder=self.endianess, length=netSize)
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['program_header_size'])
-        self.patchStructMem(curTempDataName, phs, "program_header_size")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_phentsize'])
+        self.patchStructMem(curTempDataName, phs, "e_phentsize")
 
         phoEntries = self.fillProgramHeader(pho)
         
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['program_header_count'])
-        self.patchStructMem(curTempDataName, int.to_bytes(phoEntries, byteorder=self.endianess, length=netSize), "program_header_count")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_phnum'])
+        self.patchStructMem(curTempDataName, int.to_bytes(phoEntries, byteorder=self.endianess, length=netSize), "e_phnum")
 
-        eSym = self.br.get_type_by_name(self.secHeadName).width
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['section_header_size'])
-        self.patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder=self.endianess, length=netSize), "section_header_size")
+        eSym = self.bv.get_type_by_name(self.secHeadName).width
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shentsize'])
+        self.patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder=self.endianess, length=netSize), "e_shentsize")
 
         shoEntries = self.fillSectionHeader()
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['section_header_offset'])
-        self.patchStructMem(curTempDataName, int.to_bytes(self.SH_OFFSET, byteorder=self.endianess, length=netSize), "section_header_offset")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shoff'])
+        self.patchStructMem(curTempDataName, int.to_bytes(self.SH_OFFSET, byteorder=self.endianess, length=netSize), "e_shoff")
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['section_header_count'])
-        self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList), byteorder=self.endianess, length=netSize), "section_header_count")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shnum'])
+        self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList), byteorder=self.endianess, length=netSize), "e_shnum")
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['string_table'])
-        self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList) - 3, byteorder=self.endianess, length=netSize), "string_table")
+        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shstrndx'])
+        self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList) - 3, byteorder=self.endianess, length=netSize), "e_shstrndx")
 
 def get_views(bv_t):
     bvs = list(BinaryViewType)
