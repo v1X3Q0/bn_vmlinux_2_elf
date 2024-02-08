@@ -22,11 +22,17 @@ class bn_structRetriever:
 
     # if a struct, give back struct name. else, give back none
     def getRealStructType(self, structDesig):
-        resStruct = None
-        namedStruct = structDesig.get_string_before_name()
-        if 'struct ' in namedStruct:
-            resStruct = self.bv.get_type_by_name(namedStruct.replace("struct ", ''))
-        return resStruct
+        iterating_type = None
+        iterating_type_prefix = structDesig.get_string_before_name()
+        if (('struct' in iterating_type_prefix) or ('union' in iterating_type_prefix)) and (' ' not in iterating_type_prefix):
+            print('found typeless {}'.format(iterating_type_prefix))
+            iterating_type = structDesig
+        else:
+            if 'struct ' in iterating_type_prefix:
+                iterating_type = self.bv.get_type_by_name(iterating_type_prefix.replace("struct ", ''))
+            elif 'union ' in iterating_type_prefix:
+                iterating_type = self.bv.get_type_by_name(iterating_type_prefix.replace("union ", ''))
+        return iterating_type
 
     # if a enum, give back enum name. else, give back none
     def getRealEnumType(self, enumDesig):
@@ -37,12 +43,20 @@ class bn_structRetriever:
         return resEnum
 
     def structArrFilter(self, potentialIndex, target_variable_instance, netOffset):
-        iterating_type = target_variable_instance.type.get_string_before_name()
-        if 'struct ' in iterating_type:
-            iterating_type = self.bv.get_type_by_name(iterating_type.replace("struct ", ''))
-        else:
-            # element type means its a primitive type, and get the base.
-            iterating_type = target_variable_instance.type
+        iterating_type_prefix = target_variable_instance.type.get_string_before_name()
+        # typeless structure or union, not enum
+        if (('struct' in iterating_type_prefix) or ('union' in iterating_type_prefix)) and (' ' not in iterating_type_prefix):
+            print('found typeless {}'.format(iterating_type_prefix))
+            iterating_type = target_variable_instance
+        # non typeless struct, get the juice
+        else:            
+            if 'struct ' in iterating_type_prefix:
+                iterating_type = self.bv.get_type_by_name(iterating_type_prefix.replace("struct ", ''))
+            elif 'union ' in iterating_type_prefix:
+                iterating_type = self.bv.get_type_by_name(iterating_type_prefix.replace("union ", ''))
+            else:
+                # element type means its a primitive type, and get the base.
+                iterating_type = target_variable_instance.type
         netOffset += (iterating_type.width * potentialIndex)
         # targVarVar.type.get_string_before_name()
         return iterating_type, netOffset
@@ -74,9 +88,11 @@ class bn_structRetriever:
                 cur_struct_member_name, potentialIndex = self.getIndexObject(struct_member)
                 # for each member in the current struct being observed
                 for eachMem in curTargVar.members:
+                    # print('eachmen {}'.format(eachMem))
                     # if the struct member's name is the target arg
                     # pull the type into new iterating_type
                     if eachMem.name == cur_struct_member_name:
+                        print('eachmen {}'.format(eachMem))
                         if eachMem.type.type_class == TypeClass.NamedTypeReferenceClass:
                             eachMem_type = eachMem.type.target(self.bv)
                         else:
@@ -86,11 +102,13 @@ class bn_structRetriever:
                         netOffset += eachMem.offset
                         netSize = eachMem_type.width
                         potStructType = self.getRealStructType(eachMem_type)
-                        potEnumType = self.getRealEnumType(eachMem_type)
                         if potStructType != None:
                             iterating_type = potStructType
-                        elif potEnumType != None:
+                            break
+                        potEnumType = self.getRealEnumType(eachMem_type)
+                        if potEnumType != None:
                             enumBool = potEnumType
+                            break
                         # else it must be a primitive! stuff ends here, break out
                         break
         else:
