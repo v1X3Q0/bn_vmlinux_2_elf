@@ -3,7 +3,7 @@ from binaryninja import Symbol, SymbolType, Type
 import re
 from .getStructMemOff import bn_structRetriever
 # from .parseSymFile import parseSymFile
-from .pyelf import elfSection, elfShndxEnt, elfSymbol
+from .pyelf import elfSection, elfShndxEnt, elfSymbol, elfSegment
 from .bn_raw_elf_fill.setupTypes import grabLinuxElfTypes
 
 def getEnumName(enumType, enumIndex):
@@ -13,7 +13,6 @@ def getEnumName(enumType, enumIndex):
     return None
 
 def getEnumValue(enumType, enumName):
-    print(enumType, enumName)
     for i in enumType.members:
         if i.name == enumName:
             return i.value
@@ -23,6 +22,15 @@ def fetchStructMem(targetVar, *args):
     targAddr, netOffset, netSize, enumBool = self.bn_sr.getStructMemOff(targetVar, args)
     retValue = br.read(targAddr + netOffset, netSize)
     return retValue
+
+def strings_to_enumarr(enumslist):
+    enumout = ''
+    for enumeach in enumslist:
+        if enumout == '':
+            enumout = enumeach
+        else:
+            enumout = enumout + ' | ' + enumeach
+    return enumout
 
 class vmlinux_raw:
     def __init__(self, bv, br, endianess, bitness, architecture, TEXT_OFFSET=None):
@@ -49,10 +57,11 @@ class vmlinux_raw:
 
         self.TEXT_OFFSET = TEXT_OFFSET
         if TEXT_OFFSET == None:
-            self.TEXT_OFFSET = len(self.bv.segments) * prgmsz + elfsz
+            self.TEXT_OFFSET = (int((len(self.bv.segments) * prgmsz + elfsz) / 0x1000) * 0x1000) + 0x1000
         
         self.gSymList = []
         self.gSecList = []
+        self.gPhdrList = []
         self.gShndxRaw = '\x00'
         self.gStrRaw = '\x00'
 
@@ -74,7 +83,7 @@ class vmlinux_raw:
         enumValue = None
         if enumBool == None:
             if (len(toWrite) != netSize):
-                print("wrong size?!?!? var {}.{} with len {} and estimate {}".format(targetVar, args, len(toWrite), netSize))
+                print("wrong size?!?!? var {}.{} to value {} with len {} and estimate {}".format(targetVar, args, toWrite, len(toWrite), netSize))
                 return -1
         if enumBool != None:
             if isinstance(toWrite, str):
@@ -85,31 +94,32 @@ class vmlinux_raw:
             else:
                 enumValue = toWrite
             toWrite = int.to_bytes(enumValue, byteorder=self.endianess, length=netSize)
+        print('writing to {}:{}.{} {}'.format(hex(targAddr + netOffset), targetVar, args, toWrite))
         retValue = self.br.write(targAddr + netOffset, toWrite)
         return retValue
 
-    def phEntry(self, phOff, p_type, offset, virtual_address, physical_address, file_size, memory_size, flags, align):
-        self.patchStructMem(phOff, p_type, 'p_type')
+    def phEntry(self, curVarAccessor, phEntry):
+        self.patchStructMem(curVarAccessor, phEntry.p_type, 'p_type')
         
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_offset'])
-        self.patchStructMem(phOff, int.to_bytes(offset, byteorder=self.endianess, length=netSize), 'p_offset')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['p_offset'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(phEntry.p_offset, byteorder=self.endianess, length=netSize), 'p_offset')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_vaddr'])
-        self.patchStructMem(phOff, int.to_bytes(virtual_address, byteorder=self.endianess, length=netSize), 'p_vaddr')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['p_vaddr'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(phEntry.p_vaddr, byteorder=self.endianess, length=netSize), 'p_vaddr')
         
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_paddr'])
-        self.patchStructMem(phOff, int.to_bytes(physical_address, byteorder=self.endianess, length=netSize), 'p_paddr')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['p_paddr'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(phEntry.p_paddr, byteorder=self.endianess, length=netSize), 'p_paddr')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_filesz'])
-        self.patchStructMem(phOff, int.to_bytes(file_size, byteorder=self.endianess, length=netSize), 'p_filesz')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['p_filesz'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(phEntry.p_filesz, byteorder=self.endianess, length=netSize), 'p_filesz')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_memsz'])
-        self.patchStructMem(phOff, int.to_bytes(memory_size, byteorder=self.endianess, length=netSize), 'p_memsz')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['p_memsz'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(phEntry.p_memsz, byteorder=self.endianess, length=netSize), 'p_memsz')
 
-        self.patchStructMem(phOff, flags, 'p_flags')
+        self.patchStructMem(curVarAccessor, phEntry.p_flags, 'p_flags')
 
-        netSize = self.bn_sr.getStructMemOff_netSize(phOff, ['p_align'])
-        self.patchStructMem(phOff, int.to_bytes(align, byteorder=self.endianess, length=netSize), 'p_align')
+        netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['p_align'])
+        self.patchStructMem(curVarAccessor, int.to_bytes(phEntry.p_align, byteorder=self.endianess, length=netSize), 'p_align')
 
     def symEntry(self, curVarAccessor, curSym, curTempDataName):
         # name
@@ -163,18 +173,42 @@ class vmlinux_raw:
             self.patchStructMem(curVarAccessor, int.to_bytes(0x807a, byteorder=self.endianess, length=netSize), 'sh_info')
             # entry_size
             netSize = self.bn_sr.getStructMemOff_netSize(curVarAccessor, ['sh_entsize'])
-            self.patchStructMem(curVarAccessor, int.to_bytes(self.br.get_type_by_name(self.ElfSym).width, byteorder=self.endianess, length=netSize), 'sh_entsize')
+            self.patchStructMem(curVarAccessor, int.to_bytes(self.bv.get_type_by_name(self.ElfSym).width, byteorder=self.endianess, length=netSize), 'sh_entsize')
 
-    def createHeaderSection(self, initPadding):
-        self.br.insert(0, initPadding * '\x00')
-        self.CUR_TEXT_SZ += initPadding
+    # create a section, pad the size and destination if unaligned
+    def create_memory_block(self, dest_address, initPadding):
+        newSz = self.padInt(initPadding)
+        newDest = self.padInt(dest_address)
+        print("creating at {}, {} bytes".format(newDest, newSz))
+        self.br.insert(newDest, newSz * '\x00')
+        self.CUR_TEXT_SZ += newSz
 
-    # create the 
+    def get_section_index_by_name(self, name):
+        index = 0
+        for section_iter in bv.gSecList:
+            if section_iter.name == name:
+                return index
+        return -1
+
+    # create the symbol string table
     def createSymStrTab(self):
-        Elf_SY_typeS = self.br.get_type_by_name(self.ElfSym)
+        Elf_SY_typeS = self.bv.get_type_by_name(self.ElfSym)
         Elf_SY_typeW = Elf_SY_typeS.width
-        self.br.insert(self.CUR_TEXT_SZ, (Elf_SY_typeW * len(self.gSymList)) * "\x00")
-        
+        symtabbase = self.br.length
+
+        # determine its associated string table's size
+        for each_symbol in self.bv.symbols:
+            # get the section owning the target symbol
+            symsecname = self.bv.get_sections_at(self.bv.symbols[each_symbol][0].address)[0].name
+            symsecindex = self.get_section_index_by_name(symsecname)
+            curElfSymbol = elfSymbol(symName=each_symbol, symNameOff=len(self.gStrRaw), symValue=self.bv.symbols[each_symbol].address, symInfo=0,
+                symShndx=symsecindex)
+            self.gSymList.append(curElfSymbol)
+            self.gStrRaw += each_symbol + '\x00'
+            
+        # create symbol table at the end of the binary
+        self.create_memory_block(symtabbase, (Elf_SY_typeW * len(self.gSymList)))
+
         curTempDataName = '__elf_symbol_table'
         someVarThingSym = Symbol(SymbolType.DataSymbol, self.CUR_TEXT_SZ, curTempDataName)
         self.br.define_user_symbol(someVarThingSym)
@@ -190,9 +224,13 @@ class vmlinux_raw:
             symTabIndex += 1
             # break
         
-        self.br.insert(self.CUR_TEXT_SZ, self.gStrRaw)
+        strtabbase = self.br.length
+        self.create_memory_block(strtabbase, self.gStrRaw)
+        self.br.insert(strtabbase, self.gStrRaw)
 
-    def createShndx(self):
+    # creates all the sections that will be in the final binary, but does not write them
+    # to the final vmlinux
+    def allocate_Sections(self):
         shdrName = '.shstrtab'
         shndxOffTmp = len(self.gShndxRaw)
         self.gShndxRaw += shdrName + '\x00'
@@ -204,39 +242,75 @@ class vmlinux_raw:
         strTabName = '.strtab'
         strTabOffTmp = len(self.gShndxRaw)
         self.gShndxRaw += strTabName + '\x00'
+
+        # first we want to append the valid sections that our binary has
+        for cursecname in self.bv.sections:
+            bvsec = self.bv.sections[cursecname]
+            
+            # for sections doesn't have a raw, gonna continue
+            brsec = self.br.sections[cursecname]
+            if brsec == None:
+                continue
+            curShndx_off = len(self.gShndxRaw)
+            self.gShndxRaw += cursecname + '\x00'
+            self.gSecList.append(elfSection(cursecname, curShndx_off, 'SHT_{}'.format(bvsec.type), bvsec.semantics, bvsec.start, brsec.start, bvsec.length, bvsec.align))
+
+        # create the shstrtab section for the section headers
         shstrSec = elfSection(shdrName, shndxOffTmp, 'SHT_STRTAB', 0, 0, self.CUR_TEXT_SZ, len(self.gShndxRaw), 0x1)
 
-        textPostStr = self.CUR_TEXT_SZ + len(self.gShndxRaw)
-        textPostStr = self.padInt(textPostStr)
+        # now create the symbol table section, this will need to be corrected when
+        # the symbol table has been finished, but since len is 0 the below math will
+        # eval to 0
+        FIXME_SYMTABSZ = self.bv.get_type_by_name(self.ElfSym).width * (len(self.gSymList))
+        symSec = elfSection(symTabName, symTabOffTmp, 'SHT_SYMTAB', 0, 0, self.br.length, FIXME_SYMTABSZ, 0x4)
 
-        textPostStr = textPostStr + (self.br.get_type_by_name(self.secHeadName).width * (len(self.gSecList) + 3))
-        symTabSz = self.br.get_type_by_name(self.ElfSym).width * (len(self.gSymList))
-
-        symSec = elfSection(symTabName, symTabOffTmp, 'SHT_SYMTAB', 0, 0, textPostStr, symTabSz, 0x4)
-
-        testPostSec = textPostStr + symTabSz
-        
-        strSec = elfSection(shdrName, strTabOffTmp, 'SHT_STRTAB', 0, 0, testPostSec, len(self.gStrRaw), 0x1)
+        # create the strtab, likewise since the strtab hasn't been initialized yet this will initiate to 0
+        FIXME_STRTABSZ = len(self.gStrRaw)
+        FIXME_STRTAB = self.br.length
+        strSec = elfSection(shdrName, strTabOffTmp, 'SHT_STRTAB', 0, 0, FIXME_STRTAB, FIXME_STRTABSZ, 0x1)
 
         self.gSecList.append(shstrSec)
         self.gSecList.append(symSec)
         self.gSecList.append(strSec)
 
-        self.br.insert(self.CUR_TEXT_SZ, self.gShndxRaw)
-        self.CUR_TEXT_SZ += len(self.gShndxRaw)
+
+    # create a section string table and write it to the vmlinux
+    def createShndx(self):
+
+        # then create the .shstrtab, which will have size equal to the determined
+        # gShndRaw
+        self.create_memory_block(self.br.length, len(self.gShndxRaw))
+
+        textPostStr = self.CUR_TEXT_SZ + len(self.gShndxRaw)
+        textPostStr = self.padInt(textPostStr)
+
+        textPostStr = textPostStr + (self.bv.get_type_by_name(self.secHeadName).width * (len(self.gSecList) + 3))
+
+        testPostSec = textPostStr + symTabSz
 
     def fillProgramHeader(self, pho):
-        Elf_PH_typeS = self.br.get_type_by_name(self.ElfPrgm)
+        Elf_PH_typeS = self.bv.get_type_by_name(self.ElfPrgm)
+
         curTempDataName = "__elf_program_headers"
         someVarThingSym = Symbol(SymbolType.DataSymbol, pho, curTempDataName)
         self.br.define_user_symbol(someVarThingSym)
         self.br.define_user_data_var(pho, Type.array(Elf_PH_typeS, 1))
+
         entryIndex = 0
+        if len(self.bv.segments) == 0:
+            curphdr = elfSegment(p_type="PT_LOAD", p_offset=self.TEXT_OFFSET, p_vaddr=self.TEXT_ENTRY, p_paddr=0, p_filesz=self.OG_TEXT_SZ, p_memsz=self.OG_TEXT_SZ, p_flags="PF_X | PF_W | PF_R", p_align=0x10000)
+            self.gPhdrList.append(curphdr)
+
         # this has an entry pointing to the beginning of the section header, so
-        self.phEntry('{}[{}]'.format(curTempDataName, entryIndex), "PT_LOAD", self.TEXT_OFFSET,
-            self.TEXT_ENTRY, self.TEXT_ENTRY, self.OG_TEXT_SZ, self.OG_TEXT_SZ, "PF_X | PF_W | PF_R",
-            0x10000)
-        entryIndex += 1
+        for phEntry in self.bv.segments:
+            ph_flags = strings_to_enumarr([int(phEntry.readable) * 'PF_R', int(phEntry.writeable) * 'PF_W', int(phEntry.executable) * 'PF_X'])
+            curphdr = elfSegment(p_type='PT_LOAD', p_offset=phEntry.data_offset, p_vaddr=phEntry.start, p_paddr=0, p_filesz=phEntry.data_length, p_flags=ph_flags, p_align=0)
+            self.gPhdrList.append(curphdr)
+
+        for phEntry in self.gPhdrList:
+            self.phEntry('{}[{}]'.format(curTempDataName, entryIndex), curphdr)
+            entryIndex += 1
+
         return entryIndex
     
     # it should be .shstrtab
@@ -244,11 +318,14 @@ class vmlinux_raw:
     # symtab
     # strtab
     def fillSectionHeader(self):
+        self.allocate_Sections()
         self.createShndx()
 
         secHeadIndex = 0
-        totalSections = len(self.gSecList)
+        # totalSections = len(self.gSecList)
+        totalSections = len(self.bv.sections)
         
+
         newSz = self.padInt(self.CUR_TEXT_SZ)
         self.br.insert(self.CUR_TEXT_SZ, (newSz - self.CUR_TEXT_SZ) * '\x00')
         self.CUR_TEXT_SZ = newSz
@@ -256,7 +333,7 @@ class vmlinux_raw:
         # if anywhere to use the section header offset, it is right here.
         self.SH_OFFSET = self.CUR_TEXT_SZ
 
-        Elf_SH_typeS = self.br.get_type_by_name(self.secHeadName)
+        Elf_SH_typeS = self.bv.get_type_by_name(self.secHeadName)
         Elf_SH_typeW = Elf_SH_typeS.width
         self.br.insert(self.CUR_TEXT_SZ, (Elf_SH_typeW * totalSections) * "\x00")
         
@@ -277,7 +354,7 @@ class vmlinux_raw:
     def fillElfHeader(self, symFile=None):
         # print(hex(CUR_TEXT_SZ))
         grabLinuxElfTypes(self.bv)
-        self.createHeaderSection(self.TEXT_OFFSET)
+        self.create_memory_block(0, self.TEXT_OFFSET)
         # print(hex(CUR_TEXT_SZ))
         # if symFile != None:
         #     parseSymFile(symFile)
@@ -322,20 +399,20 @@ class vmlinux_raw:
         netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_phnum'])
         self.patchStructMem(curTempDataName, int.to_bytes(phoEntries, byteorder=self.endianess, length=netSize), "e_phnum")
 
-        eSym = self.bv.get_type_by_name(self.secHeadName).width
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shentsize'])
-        self.patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder=self.endianess, length=netSize), "e_shentsize")
+        # eSym = self.bv.get_type_by_name(self.secHeadName).width
+        # netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shentsize'])
+        # self.patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder=self.endianess, length=netSize), "e_shentsize")
 
-        shoEntries = self.fillSectionHeader()
+        # shoEntries = self.fillSectionHeader()
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shoff'])
-        self.patchStructMem(curTempDataName, int.to_bytes(self.SH_OFFSET, byteorder=self.endianess, length=netSize), "e_shoff")
+        # netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shoff'])
+        # self.patchStructMem(curTempDataName, int.to_bytes(self.SH_OFFSET, byteorder=self.endianess, length=netSize), "e_shoff")
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shnum'])
-        self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList), byteorder=self.endianess, length=netSize), "e_shnum")
+        # netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shnum'])
+        # self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList), byteorder=self.endianess, length=netSize), "e_shnum")
 
-        netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shstrndx'])
-        self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList) - 3, byteorder=self.endianess, length=netSize), "e_shstrndx")
+        # netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_shstrndx'])
+        # self.patchStructMem(curTempDataName, int.to_bytes(len(self.gSecList) - 3, byteorder=self.endianess, length=netSize), "e_shstrndx")
 
 def get_views(bv_t):
     bvs = list(BinaryViewType)
