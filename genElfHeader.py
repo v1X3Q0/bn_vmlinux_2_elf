@@ -265,10 +265,16 @@ class vmlinux_raw:
                 symsecindex = 'SHT_NULL'
             else:
                 foundsecs = self.bv.get_sections_at(cursym.address)
-                symsecname = foundsecs[0].name
-                symsecindex = self.get_section_index_by_name(symsecname)
-                print("found sections {}".format(foundsecs))
-                print('sections {}'.format(self.bv.sections))
+                if foundsecs == []:
+                    symsecindex = 'SHT_NULL'
+                else:
+                    symsecname = foundsecs[0].name
+                    symsecindex = self.get_section_index_by_name(symsecname)
+                    # bad external symbol has been found, maybe binja generated?
+                    if symsecindex == -1:
+                        symsecindex = 'SHT_NULL'
+                    print("found sections {}".format(foundsecs))
+                    print('sections {}'.format(self.bv.sections))
             cursymtype = 'STT_NOTYPE'
             if cursym.type == SymbolType.FunctionSymbol:
                 cursymtype = 'STT_FUNC'
@@ -464,7 +470,7 @@ class vmlinux_raw:
         Elf_Head_typeS = self.bv.get_type_by_name(self.Elf_Head_typeS)
         if Elf_Head_typeS == None:
             print("couldn't find {}".format(self.Elf_Head_typeS))
-            return
+            return -1
 
         curTempDataName = '__elf_header'
         curHeadAddress = 0
@@ -507,7 +513,8 @@ class vmlinux_raw:
         self.patchStructMem(curTempDataName, int.to_bytes(eSym, byteorder=self.endianess, length=netSize), "e_shentsize")
 
         self.allocate_Sections()
-        self.createSymStrTab()
+        if self.createSymStrTab() == -1:
+            return -1
         self.createShndx()
 
         shoEntries = self.fillSectionHeader()

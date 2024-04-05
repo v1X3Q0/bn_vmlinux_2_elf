@@ -101,17 +101,25 @@ class kallsyms_caller_t:
             symtype = chr(self.kallsyms_get_symbol_type(off))
             symaddress = self.bv.read_pointer(self.kallsyms_addresses + i * self.bv.address_size)
             kallsyms_net.append(self.kallsym(namebuf, symtype, symaddress))
+            
+            if i < 5000:
+                if (i % 1000) == 0:
+                    print('found {} symbols'.format(i))
         return kallsyms_net
     def kallsyms_name_all(self, kallsyms_net):
         for each_func in kallsyms_net:
             self.maybedef_var(each_func.namebuf, each_func.symaddress)
 
 def fillkallsyms(bv):
+    print("beginning fillkallsyms")
     kallsyms_req_dict = {}
     for kallsyms_requirement in kallsyms_requirements:
         # if bv.symbols[kallsyms_requirement] == None:
         #     print('missing symbol {}'.format(kallsyms_requirement))
         kallsyms_req_dict[kallsyms_requirement] = bv.symbols[kallsyms_requirement][0].address
+    for i in kallsyms_req_dict.keys():
+        print('{}: {}'.format(i, hex(kallsyms_req_dict[i])))
+
     kallsyms_caller = kallsyms_caller_t(bv, kallsyms_req_dict)
     kallsyms_net = kallsyms_caller.kallsyms_resolve_all()
     kallsyms_caller.kallsyms_name_all(kallsyms_net)
