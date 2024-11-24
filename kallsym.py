@@ -1,15 +1,19 @@
 from binaryninja import SymbolType, types
 
 KSYM_NAME_LEN = 128
-kallsyms_requirements = ['kallsyms_token_table', 'kallsyms_token_index', 'kallsyms_addresses', 'kallsyms_names', 'kallsyms_num_syms']
+kallsyms_requirements = ['kallsyms_token_table', 'kallsyms_token_index', 'kallsyms_names', 'kallsyms_num_syms']
+kallsyms_optionals = ['kallsyms_offsets', 'kallsyms_addresses', 'kallsyms_relative_base']
 class kallsyms_caller_t:
     def __init__(self, bv, kallsyms_req_dict):
         self.bv = bv
         self.kallsyms_token_table = kallsyms_req_dict['kallsyms_token_table']
         self.kallsyms_token_index = kallsyms_req_dict['kallsyms_token_index']
-        self.kallsyms_addresses = kallsyms_req_dict['kallsyms_addresses']
         self.kallsyms_names = kallsyms_req_dict['kallsyms_names']
         self.kallsyms_num_syms = kallsyms_req_dict['kallsyms_num_syms']
+    def init_options(self, addresses, offsets, relative_base):
+        self.kallsyms_addresses = addresses
+        self.kallsyms_offsets = offsets
+        self.kallsyms_relative_base = relative_base
     class kallsym:
         def __init__(self, namebuf, symtype, symaddress):
             self.namebuf = namebuf
@@ -72,17 +76,31 @@ class kallsyms_caller_t:
                 tptr_dref = int.from_bytes(self.bv.read(tptr, 1), 'little')
         # /* Return to offset to the next symbol. */
         return result, off
+    def kallsyms_get_sym_addr(self, index):
+        if self.kallsyms_addresses != None:
+            addrbase = self.kallsyms_addresses
+            symaddress = self.bv.read_pointer(addrbase + index * self.bv.address_size)
+        else:
+            addrbase = self.kallsyms_offsets
+            symoffset = self.bv.read_int(addrbase + index * 4, 4, True)
+            if symoffset >= 0:
+                symaddress = self.kallsyms_relative_base + symoffset
+            else:
+                symaddress = self.kallsyms_relative_base - 1 - symoffset
+        return symaddress
     # /* Lookup the address for this symbol. Returns 0 if not found. */
     def kallsyms_lookup_name(self, name):
         namebuf = ''
         off = 0
-        for i in range(0, self.bv.read_int(self.kallsyms_num_syms, self.bv.address_size)):
+        numsyms = self.bv.read_int(self.kallsyms_num_syms, self.bv.address_size)
+        for i in range(0, numsyms):
             namebuf, off = self.kallsyms_expand_symbol(off, KSYM_NAME_LEN)
-            print("found sym {}, off was {} of {}, symtype {} symaddr {}\n".format(namebuf, off, self.kallsyms_num_syms,
-                chr(self.kallsyms_get_symbol_type(off)), hex(self.bv.read_pointer(self.kallsyms_addresses + i * self.bv.address_size))))
+            symaddress = self.kallsyms_get_sym_addr(i)
+            print("found sym {}, off was {} of {}, symtype {} symaddr {}\n".format(namebuf, off, numsyms,
+                chr(self.kallsyms_get_symbol_type(off)), hex(symaddress)))
             if namebuf == name:
-                print("found target sym, off was {} of {}, symtype {} symaddr {}\n".format(off, self.kallsyms_num_syms,
-                    chr(self.kallsyms_get_symbol_type(off)), self.bv.read_pointer(self.kallsyms_addresses + i * self.bv.address_size)))
+                print("found target sym, off was {} of {}, symtype {} symaddr {}\n".format(off, numsyms,
+                    chr(self.kallsyms_get_symbol_type(off)), hex(symaddress)))
                 return 0
         # // return module_kallsyms_lookup_name(name);
         return -1
@@ -93,15 +111,18 @@ class kallsyms_caller_t:
         newsym = types.Symbol(vartype, varaddr, "{}".format(varname))
         self.bv.define_user_symbol(newsym)        
         return
-    def kallsyms_resolve_all(self):
+    def kallsyms_resolve_all(self, resolvecount=None):
         kallsyms_net = []
         off = 0
-        for i in range(0, self.bv.read_int(self.kallsyms_num_syms, self.bv.address_size)):
+        if resolvecount == None:
+            toresolve = self.bv.read_int(self.kallsyms_num_syms, self.bv.address_size)
+        else:
+            toresolve = resolvecount
+        for i in range(0, toresolve):
             namebuf, off = self.kallsyms_expand_symbol(off, KSYM_NAME_LEN)
             symtype = chr(self.kallsyms_get_symbol_type(off))
-            symaddress = self.bv.read_pointer(self.kallsyms_addresses + i * self.bv.address_size)
+            symaddress = self.kallsyms_get_sym_addr(i)
             kallsyms_net.append(self.kallsym(namebuf, symtype, symaddress))
-            
             if i < 5000:
                 if (i % 1000) == 0:
                     print('found {} symbols'.format(i))
@@ -109,7 +130,6 @@ class kallsyms_caller_t:
     def kallsyms_name_all(self, kallsyms_net):
         for each_func in kallsyms_net:
             self.maybedef_var(each_func.namebuf, each_func.symaddress)
-
 def fillkallsyms(bv):
     print("beginning fillkallsyms")
     kallsyms_req_dict = {}
@@ -119,8 +139,17 @@ def fillkallsyms(bv):
         kallsyms_req_dict[kallsyms_requirement] = bv.symbols[kallsyms_requirement][0].address
     for i in kallsyms_req_dict.keys():
         print('{}: {}'.format(i, hex(kallsyms_req_dict[i])))
-
     kallsyms_caller = kallsyms_caller_t(bv, kallsyms_req_dict)
+    if ('kallsyms_addresses' in bv.symbols) == True:
+        addrtmp = bv.symbols['kallsyms_addresses'][0].address
+        kallsyms_caller.init_options(addrtmp, None, None)
+    else:
+        addrtmp = bv.symbols['kallsyms_offsets'][0].address
+        if ('kallsyms_relative_base' in bv.symbols) == True:
+            rel = bv.read_pointer(bv.symbols['kallsyms_relative_base'][0].address)
+        else:
+            rel = bv.start
+        kallsyms_caller.init_options(None, addrtmp, rel)
     kallsyms_net = kallsyms_caller.kallsyms_resolve_all()
     kallsyms_caller.kallsyms_name_all(kallsyms_net)
     return kallsyms_caller
