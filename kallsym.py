@@ -1,6 +1,7 @@
-from binaryninja import SymbolType, types
+from binaryninja import SymbolType, types, interaction
 
 KSYM_NAME_LEN = 128
+PLUGIN_NAME = "fillkalsyms"
 kallsyms_requirements = ['kallsyms_token_table', 'kallsyms_token_index', 'kallsyms_names', 'kallsyms_num_syms']
 kallsyms_optionals = ['kallsyms_offsets', 'kallsyms_addresses', 'kallsyms_relative_base']
 class kallsyms_caller_t:
@@ -136,9 +137,17 @@ def fillkallsyms(bv):
     for kallsyms_requirement in kallsyms_requirements:
         # if bv.symbols[kallsyms_requirement] == None:
         #     print('missing symbol {}'.format(kallsyms_requirement))
-        kallsyms_req_dict[kallsyms_requirement] = bv.symbols[kallsyms_requirement][0].address
-    for i in kallsyms_req_dict.keys():
-        print('{}: {}'.format(i, hex(kallsyms_req_dict[i])))
+        kallsyms_req_dict[kallsyms_requirement] = bv.get_symbol_by_raw_name(kallsyms_requirement)
+        # kallsyms_req_dict[kallsyms_requirement] = bv.symbols[kallsyms_requirement][0].address
+    needreqmsg = ""
+    for kallsyms_requirement in kallsyms_req_dict.keys():
+        if kallsyms_req_dict[kallsyms_requirement] == None:
+            needreqmsg += "need: {}\n".format(kallsyms_requirement)
+    if needreqmsg != "":
+        interaction.show_message_box(PLUGIN_NAME, needreqmsg)
+        return None
+    for kallsyms_requirement in kallsyms_req_dict.keys():
+        print('{}: {}'.format(kallsyms_requirement, hex(kallsyms_req_dict[kallsyms_requirement])))
     kallsyms_caller = kallsyms_caller_t(bv, kallsyms_req_dict)
     if ('kallsyms_addresses' in bv.symbols) == True:
         addrtmp = bv.symbols['kallsyms_addresses'][0].address
