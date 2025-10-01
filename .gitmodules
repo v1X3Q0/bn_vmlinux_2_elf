@@ -4,3 +4,12 @@
 [submodule "common/local_util"]
 	path = common/local_util
 	url = https://github.com/v1X3Q0/local_util.git
+[submodule "common/kern_img"]
+	path = common/kern_img
+	url = https://github.com/v1X3Q0/kern_img.git
+[submodule "linux/helpers/tools/parseandroidkernrel"]
+	path = linux/helpers/tools/parseandroidkernrel
+	url = https://github.com/v1X3Q0/parseandroidkernrel.git
+[submodule "linux/rwDrv"]
+	path = linux/rwDrv
+	url = https://github.com/v1X3Q0/rwDrv.git

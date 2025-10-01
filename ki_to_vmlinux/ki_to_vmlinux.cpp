@@ -2,7 +2,6 @@
 
 #include <localUtil.h>
 #include <kern_static.h>
-#include <drv_share.h>
 
 #include <kernel_block.h>
 
