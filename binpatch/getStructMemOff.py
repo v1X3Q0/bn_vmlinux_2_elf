@@ -64,6 +64,9 @@ class bn_structRetriever:
     # potential ways to call
     # "__elf_program_headers[2]", "type"
     def getStructMemOff(self, target_variable_name_whole, struct_member_rabbit_hole):
+        """
+        check a struct for if the member is in it, and return the offset/ballpark of type
+        """
         netOffset = 0
         netSize = 0
         target_variable_name, potentialIndex = self.getIndexObject(target_variable_name_whole)

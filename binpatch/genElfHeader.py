@@ -1,10 +1,10 @@
-from binaryninja.binaryview import BinaryViewType, BinaryView, Endianness
+from binaryninja.binaryview import BinaryViewType, BinaryView, Endianness, Architecture
 from binaryninja import Symbol, SymbolType, Type, SectionSemantics
 import re
 from .getStructMemOff import bn_structRetriever
 # from .parseSymFile import parseSymFile
 from .pyelf import elfSection, elfShndxEnt, elfSymbol, elfSegment
-from .bn_raw_elf_fill.setupTypes import grabLinuxElfTypes
+from ..bn_raw_elf_fill.setupTypes import grabLinuxElfTypes
 
 def getEnumName(enumType, enumIndex):
     for i in enumType.members:
@@ -95,14 +95,17 @@ class vmlinux_raw:
                 newargs.append(i)
             newargs[len(newargs) - 1] = bitfieldparse.groups()[0]
             args = newargs
+        # get the offset and if its an enum
         targAddr, netOffset, netSize, enumBool = self.bn_sr.getStructMemOff(targetVar, args)
         enumValue = None
+        # we have a standard type, just write to it
         if enumBool == None:
             if isinstance(toWrite, int):
                 toWrite = int.to_bytes(toWrite, netSize, self.endianess)
             if (len(toWrite) != netSize):
                 print("wrong size?!?!? var {}.{} to value {} with len {} and estimate {}".format(targetVar, args, toWrite, len(toWrite), netSize))
                 return -1
+        # we have an enum, get its val and perform write
         if enumBool != None:
             if isinstance(toWrite, str):
                 print("current enum to annotate ({})".format(toWrite))
@@ -478,13 +481,40 @@ class vmlinux_raw:
         self.br.define_user_symbol(someVarThingSym)
         self.br.define_user_data_var(curHeadAddress, Elf_Head_typeS)
         self.patchStructMem(curTempDataName, b"\x7fELF", "e_ident", "signature")
-        self.patchStructMem(curTempDataName, b"\x01", "e_ident", "file_class")
-        self.patchStructMem(curTempDataName, b"\x01", "e_ident", "encoding")
+        
+        # 32 or 64 bit byte, 1 or 2
+        e_class_local = None
+        if self.bv.address_size == 4:
+            e_class_local = 1
+        elif self.bv.address_size == 8:
+            e_class_local = 2
+        e_class_localb = e_class_local.to_bytes(1, self.endianess)
+        self.patchStructMem(curTempDataName, e_class_localb, "e_ident", "file_class")
+        
+        # little or big, 1 or 2
+        e_encode = None
+        if self.endianess == 'little':
+            e_encode = 1
+        elif self.endianess == 'big':
+            e_encode = 2
+        e_encodeb = e_encode.to_bytes(1, self.endianess)
+        self.patchStructMem(curTempDataName, e_encodeb, "e_ident", "encoding")
+
         self.patchStructMem(curTempDataName, b"\x01", "e_ident", "version")
         self.patchStructMem(curTempDataName, b"\x61", "e_ident", "os")
         self.patchStructMem(curTempDataName, b"\x00", "e_ident", "abi_version")
-        self.patchStructMem(curTempDataName, "ET_EXEC", "e_type")
-        self.patchStructMem(curTempDataName, "EM_ARM", "e_machine")
+
+        # default ET_EXEC for executable file
+        e_type_l = "ET_EXEC"
+        self.patchStructMem(curTempDataName, e_type_l, "e_type")
+        
+        # get architecture flag
+        e_arch_l = None
+        if self.bv.arch == Architecture['armv7']:
+            e_arch_l = 'EM_ARM'
+        
+        self.patchStructMem(curTempDataName, e_arch_l, "e_machine")
+
         self.patchStructMem(curTempDataName, b"\x01", "e_version")
         netSize = self.bn_sr.getStructMemOff_netSize(curTempDataName, ['e_entry'])
         self.patchStructMem(curTempDataName, int.to_bytes(self.TEXT_ENTRY, byteorder=self.endianess, length=netSize), "e_entry")

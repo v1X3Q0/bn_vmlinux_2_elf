@@ -1,5 +1,5 @@
-from .genElfHeader import genElfHeader
-from .kallsym import fillkallsyms
+from .binpatch.genElfHeader import genElfHeader
+from .binpatch.kallsym import fillkallsyms
 from .bn_raw_elf_fill.add_header_binaryninja import add_header_p
 from binaryninja import PluginCommand
 
