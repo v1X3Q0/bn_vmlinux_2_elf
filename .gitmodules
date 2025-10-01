@@ -1,3 +1,6 @@
 [submodule "bn_raw_elf_fill"]
 	path = bn_raw_elf_fill
 	url = git@github.com:v1X3Q0/bn_raw_elf_fill.git
+[submodule "common/local_util"]
+	path = common/local_util
+	url = https://github.com/v1X3Q0/local_util.git
