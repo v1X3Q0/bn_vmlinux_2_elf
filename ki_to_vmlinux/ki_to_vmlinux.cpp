@@ -21,7 +21,7 @@ void progHeadConstruction(Elf64_Phdr* phHead, size_t imageSz)
 }
 
 
-int ki_to_vmlinux(int target_arch, int endianess, size_t bitness_local, void* kernimgBase, size_t kernimgSz, const char* vmlinux_targ)
+int ki_to_vmlinux(const char* target_config, int target_arch, int endianess, size_t bitness_local, void* kernimgBase, size_t kernimgSz, const char* vmlinux_targ)
 {
     int result = -1;
     FILE* out_vmlinux = 0;
@@ -49,4 +49,5 @@ int ki_to_vmlinux(int target_arch, int endianess, size_t bitness_local, void* ke
 fail:
     SAFE_FCLOSE(out_vmlinux);
     SAFE_DEL(parsedKernimg);
+    return result;
 }

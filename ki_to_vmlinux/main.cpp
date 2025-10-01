@@ -28,8 +28,6 @@ int usage(const char* name)
     exit(EXIT_FAILURE);
 }
 
-int pull_target_parameters(kern_static* targ_kern, const char* target_a);
-
 int main(int argc, char **argv)
 {
     int result = -1;
@@ -171,7 +169,7 @@ int main(int argc, char **argv)
 
     SAFE_BAIL(block_grab(kernimg_targ, (void**)&kernimgBase, &kernimgSz) == -1);
 
-    SAFE_BAIL(ki_to_vmlinux(target_arch, endianess, bitness_local, kernimgBase, kernimgSz, vmlinux_targ) == -1);
+    SAFE_BAIL(ki_to_vmlinux(target_config, target_arch, endianess, bitness_local, kernimgBase, kernimgSz, vmlinux_targ) == -1);
 
     result = 0;
 fail:
