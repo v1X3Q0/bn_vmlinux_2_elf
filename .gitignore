@@ -5,6 +5,7 @@ __pycache__/
 
 # for new c stuff
 build*
+.vscode
 
 # C extensions
 *.so

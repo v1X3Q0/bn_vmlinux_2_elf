@@ -32,3 +32,5 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${INCLUDE_DIRS})
 
 # for the kernel image parsing
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LINK_LIBRARIES})
+
+add_subdirectory(binja)
